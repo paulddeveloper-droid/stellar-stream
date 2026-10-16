@@ -12,8 +12,9 @@ For initial production setup, refer to the **[Deployment Guide](DEPLOYMENT.md)**
 6. [Indexer Falls Behind](#indexer-falls-behind)
 7. [Webhook Dead-Letter Spike](#webhook-dead-letter-spike)
 8. [Webhook Delivery Outcome Signal](#webhook-delivery-outcome-signal)
-9. [SQLite WAL Size Growth](#sqlite-wal-size-growth)
-10. [Contract Invocation Timeout](#contract-invocation-timeout)
+9. [Frontend Browser CI Outcome Signal](#frontend-browser-ci-outcome-signal)
+10. [SQLite WAL Size Growth](#sqlite-wal-size-growth)
+11. [Contract Invocation Timeout](#contract-invocation-timeout)
 
 ---
 
@@ -238,6 +239,31 @@ Currently, archiving is defined in the codebase but not exposed via a CLI or API
 1. `blocked` with `counts.deadLetters > 0` — the destination has remained unavailable. Follow [Webhook Dead-Letter Spike](#webhook-dead-letter-spike).
 2. `blocked` with `counts.pending > 0` and no destination configured — set `WEBHOOK_DESTINATION_URL` in the backend `.env` and restart the service.
 3. `transient_delay` — take no action while the queued count is falling. If it stops draining, inspect the worker log for `webhook delivery scheduled for retry` and confirm the destination is reachable.
+
+---
+
+### Frontend Browser CI Outcome Signal
+**Symptoms:**
+- The Playwright E2E workflow reports `success`, `transient_delay`, or `blocked` in the GitHub Actions step summary.
+- The Playwright test timed out, passed after retry, or waited for backend/frontend readiness.
+
+**Outcome meanings:**
+
+| Outcome | Meaning | Owner action |
+| --- | --- | --- |
+| `success` | Services were ready on the first poll and browser tests passed on the first attempt. | No action. |
+| `transient_delay` | Services needed additional readiness polls, or a browser test passed on its single retry. | Frontend owner reviews the Playwright HTML report and readiness duration; rerun once. Track recurring delays instead of increasing timeouts without evidence. |
+| `blocked` | Services did not become ready within 150 seconds, a browser test still failed/timed out after retry, or browser results were unavailable. | Frontend owner inspects the readiness status and Playwright HTML artifact, identifies whether startup or a UI test is blocked, then fixes or routes the issue to the service owner. Keep the workflow failing until verified. |
+
+**Diagnosis:**
+1. Read the workflow step summary first. It contains only the outcome, test counts, and readiness duration; it does not include test error text, URLs, or environment values.
+2. For `transient_delay`, use the Playwright HTML artifact to inspect the test that retried and compare the readiness wait across runs. A single recovery is informational; repeated delays need an owner-tracked issue.
+3. For `blocked` during readiness, inspect Docker Compose service health and startup logs in the workflow run. For a browser timeout, inspect the named test and trace in the Playwright HTML artifact. Do not paste raw environment files or unredacted runner logs into an issue.
+
+**Remediation:**
+1. If readiness was blocked, verify backend health and frontend availability in the Compose stack, then correct the failing service startup before rerunning.
+2. If the same browser test times out on both attempts, the frontend owner fixes the wait condition or slow UI behavior based on the trace; do not raise the 60-second test timeout just to turn the signal green.
+3. Verify the next run reports `success` or a documented, non-recurring `transient_delay`. Escalate persistent service startup failures to the owner of the affected Compose service.
 
 ---
 
